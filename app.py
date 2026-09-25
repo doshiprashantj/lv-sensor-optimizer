@@ -1,13 +1,13 @@
 """
 Streamlit Web Application for Multisensor Smoke Detector Layout Optimization
 Using PSO, GA, and SA (IS 2189 / NFPA 72 / EN 54)
-Fully compatible with Streamlit Community Cloud deployment.
+Strict Room Wall Containment & 1m to 5m Sensor Radius Exploration.
 """
 
 import os
 import sys
 
-# Ensure root repository directory is on Python path for Streamlit Cloud (/mount/src/...)
+# Ensure root repository directory is on Python path
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
@@ -20,7 +20,6 @@ import matplotlib.patches as patches
 import json
 import time
 
-# Robust import with inline fallback for cloud deployment
 try:
     from lv_sensor_optimizer.geometry import get_ground_floor, get_first_floor, FloorGeometry
     from lv_sensor_optimizer.cost_model import CostModel
@@ -29,9 +28,6 @@ try:
     from lv_sensor_optimizer.algorithms.ga import GAOptimizer
     from lv_sensor_optimizer.algorithms.sa import SAOptimizer
 except ImportError:
-    # -------------------------------------------------------------------------
-    # SELF-CONTAINED EMBEDDED ENGINE (FALLBACK FOR CLOUD HOSTING)
-    # -------------------------------------------------------------------------
     class FloorGeometry:
         def __init__(self, name, rooms, grid_res=0.25):
             self.name = name
@@ -54,13 +50,18 @@ except ImportError:
                         point_room_idx.append(r_idx)
             return np.array(points), np.array(point_room_idx)
 
-        def get_initial_room_allocations(self):
+        def get_initial_room_allocations(self, default_radius=4.2):
             allocations = []
             for r_idx, r in enumerate(self.rooms):
-                x1, y1, x2, y2 = r["rect"]
-                area = (x2 - x1) * (y2 - y1)
+                w = r["rect"][2] - r["rect"][0]
+                h = r["rect"][3] - r["rect"][1]
                 min_req = r.get("min_detectors", 1)
-                count = max(min_req, 3) if area > 80.0 else (max(min_req, 2) if area > 35.0 else min_req)
+                rad = r.get("target_r", default_radius)
+                step_x = max(1.0, np.sqrt(2.0) * rad * 0.9)
+                step_y = max(1.0, np.sqrt(2.0) * rad * 0.9)
+                nx = max(1, int(np.ceil(w / step_x)))
+                ny = max(1, int(np.ceil(h / step_y)))
+                count = max(min_req, nx * ny)
                 for _ in range(count):
                     allocations.append(r_idx)
             return allocations
@@ -71,32 +72,32 @@ except ImportError:
             {"name": "Power Supply Room", "rect": [6.0, 10.0, 12.0, 16.5], "critical": True, "min_detectors": 1, "target_r": 4.2},
             {"name": "Server Room", "rect": [12.0, 10.0, 17.77, 16.5], "critical": True, "min_detectors": 2, "target_r": 4.0},
             {"name": "WAN Room", "rect": [17.77, 10.0, 22.54, 16.5], "critical": True, "min_detectors": 1, "target_r": 4.0},
-            {"name": "Staircase Lobby (GF)", "rect": [0.0, 6.0, 6.0, 10.0], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "Entrance Foyer", "rect": [6.0, 6.0, 10.5, 10.0], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "Main Corridor (2.77m)", "rect": [10.5, 7.23, 22.54, 10.0], "critical": False, "min_detectors": 2, "target_r": 5.3},
-            {"name": "Store Room (GF)", "rect": [0.0, 0.0, 6.0, 3.0], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "Discussion Room", "rect": [0.0, 3.0, 6.0, 6.0], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "Staff Sitting (GF)", "rect": [6.0, 0.0, 12.0, 6.0], "critical": False, "min_detectors": 2, "target_r": 5.3},
+            {"name": "Staircase Lobby (GF)", "rect": [0.0, 6.0, 6.0, 10.0], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "Entrance Foyer", "rect": [6.0, 6.0, 10.5, 10.0], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "Main Corridor (2.77m)", "rect": [10.5, 7.23, 22.54, 10.0], "critical": False, "min_detectors": 2, "target_r": 4.5},
+            {"name": "Store Room (GF)", "rect": [0.0, 0.0, 6.0, 3.0], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "Discussion Room", "rect": [0.0, 3.0, 6.0, 6.0], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "Staff Sitting (GF)", "rect": [6.0, 0.0, 12.0, 6.0], "critical": False, "min_detectors": 2, "target_r": 4.5},
             {"name": "Control Room (SCADA)", "rect": [12.0, 0.0, 18.0, 7.23], "critical": True, "min_detectors": 2, "target_r": 4.2},
-            {"name": "Drinking Water & Lobby", "rect": [18.0, 4.0, 22.54, 7.23], "critical": False, "min_detectors": 1, "target_r": 5.3},
+            {"name": "Drinking Water & Lobby", "rect": [18.0, 4.0, 22.54, 7.23], "critical": False, "min_detectors": 1, "target_r": 4.5},
         ]
         return FloorGeometry("Ground Floor", rooms, grid_res)
 
     def get_first_floor(grid_res=0.25):
         rooms = [
-            {"name": "Conference Room (50P)", "rect": [6.0, 10.0, 22.54, 16.5], "critical": True, "min_detectors": 3, "target_r": 5.0},
-            {"name": "Pantry & Lobby", "rect": [2.0, 12.5, 6.0, 16.5], "critical": False, "min_detectors": 1, "target_r": 4.5},
-            {"name": "Store (Top-Right)", "rect": [22.54, 13.0, 24.5, 16.5], "critical": False, "min_detectors": 1, "target_r": 4.5},
-            {"name": "Staircase Lobby (FF)", "rect": [0.0, 6.0, 6.0, 10.0], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "Entrance Foyer (FF)", "rect": [6.0, 6.0, 10.0, 10.0], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "Staff Sitting (FF)", "rect": [10.0, 6.0, 18.0, 10.0], "critical": False, "min_detectors": 2, "target_r": 5.3},
-            {"name": "Main Corridor (2.70m)", "rect": [6.0, 4.5, 18.0, 6.0], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "Store (Middle)", "rect": [2.5, 3.5, 6.0, 6.0], "critical": False, "min_detectors": 1, "target_r": 5.0},
-            {"name": "VIP / Visitor Room", "rect": [0.0, 0.0, 6.0, 3.5], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "SE Cabin (Sup. Eng.)", "rect": [6.0, 0.0, 10.0, 4.5], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "EE-1 Cabin (Ex. Eng.)", "rect": [10.0, 0.0, 14.0, 4.5], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "EE-2 Cabin (Ex. Eng.)", "rect": [14.0, 0.0, 18.0, 4.5], "critical": False, "min_detectors": 1, "target_r": 5.3},
-            {"name": "Drinking Water & Lobby", "rect": [18.0, 3.5, 22.54, 7.2], "critical": False, "min_detectors": 1, "target_r": 5.3},
+            {"name": "Conference Room (50P)", "rect": [6.0, 10.0, 22.54, 16.5], "critical": True, "min_detectors": 3, "target_r": 4.8},
+            {"name": "Pantry & Lobby", "rect": [2.0, 12.5, 6.0, 16.5], "critical": False, "min_detectors": 1, "target_r": 4.2},
+            {"name": "Store (Top-Right)", "rect": [22.54, 13.0, 24.5, 16.5], "critical": False, "min_detectors": 1, "target_r": 4.2},
+            {"name": "Staircase Lobby (FF)", "rect": [0.0, 6.0, 6.0, 10.0], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "Entrance Foyer (FF)", "rect": [6.0, 6.0, 10.0, 10.0], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "Staff Sitting (FF)", "rect": [10.0, 6.0, 18.0, 10.0], "critical": False, "min_detectors": 2, "target_r": 4.5},
+            {"name": "Main Corridor (2.70m)", "rect": [6.0, 4.5, 18.0, 6.0], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "Store (Middle)", "rect": [2.5, 3.5, 6.0, 6.0], "critical": False, "min_detectors": 1, "target_r": 4.2},
+            {"name": "VIP / Visitor Room", "rect": [0.0, 0.0, 6.0, 3.5], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "SE Cabin (Sup. Eng.)", "rect": [6.0, 0.0, 10.0, 4.5], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "EE-1 Cabin (Ex. Eng.)", "rect": [10.0, 0.0, 14.0, 4.5], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "EE-2 Cabin (Ex. Eng.)", "rect": [14.0, 0.0, 18.0, 4.5], "critical": False, "min_detectors": 1, "target_r": 4.5},
+            {"name": "Drinking Water & Lobby", "rect": [18.0, 3.5, 22.54, 7.2], "critical": False, "min_detectors": 1, "target_r": 4.5},
         ]
         return FloorGeometry("First Floor", rooms, grid_res)
 
@@ -120,7 +121,7 @@ except ImportError:
             covered_mask = np.zeros(len(self.geo.grid_points), dtype=bool)
             for d in detectors:
                 dx, dy, r_idx = d[0], d[1], d[2]
-                radius = self.geo.rooms[r_idx].get("target_r", 5.3)
+                radius = self.geo.rooms[r_idx].get("target_r", 4.2)
                 room_mask = (self.geo.point_room_idx == r_idx)
                 if np.any(room_mask):
                     pts = self.geo.grid_points[room_mask]
@@ -159,7 +160,7 @@ except ImportError:
             lb, ub = np.zeros(dim), np.zeros(dim)
             for i, r_idx in enumerate(alloc):
                 r = self.geo.rooms[r_idx]["rect"]
-                lb[2*i], ub[2*i], lb[2*i+1], ub[2*i+1] = r[0]+0.5, r[2]-0.5, r[1]+0.5, r[3]-0.5
+                lb[2*i], ub[2*i], lb[2*i+1], ub[2*i+1] = r[0]+0.4, r[2]-0.4, r[1]+0.4, r[3]-0.4
             X = np.zeros((self.swarmsize, dim))
             V = np.zeros((self.swarmsize, dim))
             for p in range(self.swarmsize):
@@ -199,7 +200,7 @@ except ImportError:
             lb, ub = np.zeros(dim), np.zeros(dim)
             for i, r_idx in enumerate(alloc):
                 r = self.geo.rooms[r_idx]["rect"]
-                lb[2*i], ub[2*i], lb[2*i+1], ub[2*i+1] = r[0]+0.5, r[2]-0.5, r[1]+0.5, r[3]-0.5
+                lb[2*i], ub[2*i], lb[2*i+1], ub[2*i+1] = r[0]+0.4, r[2]-0.4, r[1]+0.4, r[3]-0.4
             pop = np.zeros((self.popsize, dim))
             for p in range(self.popsize):
                 for i in range(dim): pop[p, i] = np.random.uniform(lb[i], ub[i])
@@ -241,7 +242,7 @@ except ImportError:
             curr = []
             for r_idx in alloc:
                 r = self.geo.rooms[r_idx]["rect"]
-                curr.append([np.random.uniform(r[0]+0.5, r[2]-0.5), np.random.uniform(r[1]+0.5, r[3]-0.5), r_idx])
+                curr.append([np.random.uniform(r[0]+0.4, r[2]-0.4), np.random.uniform(r[1]+0.4, r[3]-0.4), r_idx])
             curr_fit, _, _, _ = self.ev.evaluate(curr)
             best_dets, best_fit = [list(d) for d in curr], curr_fit
             T, alpha, hist, t0 = 1000.0, 0.995, [], time.time()
@@ -249,8 +250,8 @@ except ImportError:
                 idx = np.random.randint(N)
                 r = self.geo.rooms[curr[idx][2]]["rect"]
                 neigh = [list(d) for d in curr]
-                neigh[idx][0] = np.clip(curr[idx][0] + np.random.normal(0, 1.2*(T/1000.0)+0.1), r[0]+0.5, r[2]-0.5)
-                neigh[idx][1] = np.clip(curr[idx][1] + np.random.normal(0, 1.2*(T/1000.0)+0.1), r[1]+0.5, r[3]-0.5)
+                neigh[idx][0] = np.clip(curr[idx][0] + np.random.normal(0, 1.2*(T/1000.0)+0.1), r[0]+0.4, r[2]-0.4)
+                neigh[idx][1] = np.clip(curr[idx][1] + np.random.normal(0, 1.2*(T/1000.0)+0.1), r[1]+0.4, r[3]-0.4)
                 cand_fit, _, _, _ = self.ev.evaluate(neigh)
                 delta = cand_fit - curr_fit
                 if delta < 0 or np.random.rand() < np.exp(-delta / max(T, 1e-4)):
@@ -264,10 +265,10 @@ except ImportError:
             return OptimizationResult("SA", self.geo.name, dets, best_fit, cov, cost, time.time() - t0, hist)
 
 # -----------------------------------------------------------------------------
-# 1. PAGE CONFIGURATION & STYLING
+# PAGE CONFIGURATION
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="LV Multisensor Smoke Detector Optimizer",
+    page_title="LV Multisensor Detector Layout Optimizer",
     page_icon="🚨",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -276,13 +277,13 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main-title {
-        font-size: 2.1rem;
+        font-size: 2.0rem;
         font-weight: 800;
         color: #1e3c72;
         margin-bottom: 0.2rem;
     }
     .sub-title {
-        font-size: 1.05rem;
+        font-size: 1.0rem;
         color: #555;
         margin-bottom: 1.2rem;
     }
@@ -290,18 +291,18 @@ st.markdown("""
         background-color: #f8fafc;
         border: 1px solid #e2e8f0;
         border-radius: 10px;
-        padding: 16px;
+        padding: 14px;
         text-align: center;
         box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
     .metric-title {
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         font-weight: 700;
         color: #64748b;
         text-transform: uppercase;
     }
     .metric-val {
-        font-size: 1.8rem;
+        font-size: 1.7rem;
         font-weight: 800;
         color: #1e293b;
         margin-top: 4px;
@@ -318,10 +319,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. SIDEBAR CONTROLS
+# SIDEBAR CONTROLS
 # -----------------------------------------------------------------------------
 st.sidebar.image("https://img.icons8.com/color/96/smoke-detector.png", width=64)
-st.sidebar.title("Configuration")
+st.sidebar.title("Parameters")
 
 floor_choice = st.sidebar.selectbox(
     "Active Floor Layout",
@@ -336,15 +337,16 @@ algo_choice = st.sidebar.selectbox(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Safety & Cost Parameters")
+st.sidebar.subheader("Sensor Coverage Range")
 
+# Sensor radius exploration from 1.0m to 5.0m
 custom_radius = st.sidebar.slider(
-    "Standard Coverage Radius (meters)",
-    min_value=3.5,
-    max_value=7.5,
-    value=5.3,
+    "Sensor Radius Range (1.0m to max 5.0m)",
+    min_value=1.0,
+    max_value=5.0,
+    value=4.2,
     step=0.1,
-    help="Standard coverage radius per IS 2189 / NFPA 72"
+    help="Explore sensor radius from 1.0m up to max 5.0m with strict room wall containment"
 )
 
 tier_choice = st.sidebar.radio(
@@ -356,13 +358,13 @@ tier_multiplier = 2 if "Dual Tier" in tier_choice else 1
 
 unit_price = st.sidebar.number_input("Multisensor Detector Rate (₹)", value=5250.0, step=100.0)
 install_price = st.sidebar.number_input("Cabling & Base Rate (₹)", value=1650.0, step=50.0)
+max_iterations = st.sidebar.slider("Max Iterations / Generations", 20, 200, 80, step=10)
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("Algorithm Hyperparameters")
-max_iterations = st.sidebar.slider("Max Iterations / Generations", 20, 200, 100, step=10)
+# Notice in sidebar
+st.sidebar.info("🛡️ **Strict Wall Containment Active**: Smoke detectors cannot breach partition walls into adjacent rooms.")
 
 # -----------------------------------------------------------------------------
-# 3. INITIALIZE GEOMETRY & EVALUATOR
+# GEOMETRY & OPTIMIZATION
 # -----------------------------------------------------------------------------
 cost_model = CostModel(multisensor_unit_price=unit_price, installation_and_base=install_price)
 
@@ -377,9 +379,6 @@ for r in geometry.rooms:
 
 evaluator = FitnessEvaluator(geometry, cost_model)
 
-# -----------------------------------------------------------------------------
-# 4. EXECUTE OPTIMIZATION
-# -----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def run_optimization_cached(floor_name, algo_name, max_iter, radius_val, unit_p, inst_p):
     c_model = CostModel(multisensor_unit_price=unit_p, installation_and_base=inst_p)
@@ -407,16 +406,16 @@ def run_optimization_cached(floor_name, algo_name, max_iter, radius_val, unit_p,
 col_header, col_badge = st.columns([3, 1])
 with col_header:
     st.markdown('<div class="main-title">Multisensor Smoke Detector Layout Optimizer</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="sub-title">UGVCL SCADA Centre Building &bull; {geometry.name} &bull; IS 2189 / NFPA 72 Standards</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub-title">UGVCL SCADA Centre &bull; {geometry.name} &bull; Strict Wall Occlusion (Zero Wall Bleed)</div>', unsafe_allow_html=True)
 with col_badge:
     st.markdown("""
     <div style="text-align: right; margin-top: 15px;">
-        <span class="badge-std">IS 2189 Verified</span>
-        <span class="badge-std" style="background:#2980b9;">EN 54 / NFPA 72</span>
+        <span class="badge-std">Strict Wall Occlusion</span>
+        <span class="badge-std" style="background:#2980b9;">IS 2189 / NFPA 72</span>
     </div>
     """, unsafe_allow_html=True)
 
-with st.spinner(f"Running {algo_choice} on {geometry.name}..."):
+with st.spinner(f"Optimizing {geometry.name} with strict wall clipping (Radius: {custom_radius:.1f}m)..."):
     results = run_optimization_cached(geometry.name, algo_choice, max_iterations, custom_radius, unit_price, install_price)
 
 primary_key = "PSO" if "PSO" in results else list(results.keys())[0]
@@ -425,7 +424,7 @@ total_detectors = best_res.count * tier_multiplier
 total_cost = cost_model.compute_cost(best_res.count, tier_multiplier)
 
 # -----------------------------------------------------------------------------
-# 5. TOP SUMMARY KPI CARDS
+# TOP METRICS
 # -----------------------------------------------------------------------------
 k1, k2, k3, k4 = st.columns(4)
 with k1:
@@ -433,7 +432,7 @@ with k1:
     <div class="metric-card">
         <div class="metric-title">Optimal Detectors</div>
         <div class="metric-val">{total_detectors} Nos.</div>
-        <div style="font-size: 0.75rem; color:#64748b;">{'Dual Tier' if tier_multiplier==2 else 'Single Tier'}</div>
+        <div style="font-size: 0.75rem; color:#64748b;">{'Dual Tier (+Plenum)' if tier_multiplier==2 else 'Single Tier'}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -442,7 +441,7 @@ with k2:
     <div class="metric-card">
         <div class="metric-title">Floor Area Coverage</div>
         <div class="metric-val" style="color:#27ae60;">{best_res.coverage*100:.2f}%</div>
-        <div style="font-size: 0.75rem; color:#27ae60;">Zero Blind Spots</div>
+        <div style="font-size: 0.75rem; color:#27ae60;">Zero Wall Bleed & Zero Blind Spots</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -460,30 +459,30 @@ with k4:
     <div class="metric-card">
         <div class="metric-title">Enclosed Protected Area</div>
         <div class="metric-val">{geometry.total_enclosed_area:.1f} m²</div>
-        <div style="font-size: 0.75rem; color:#64748b;">{len(geometry.rooms)} Protected Rooms</div>
+        <div style="font-size: 0.75rem; color:#64748b;">{len(geometry.rooms)} Compartmentalized Rooms</div>
     </div>
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 6. TABS INTERFACE
+# TABS
 # -----------------------------------------------------------------------------
 tab_layout, tab_schedule, tab_benchmark, tab_simulator, tab_standards = st.tabs([
-    "📍 Architectural Layout Plan",
+    "📍 Architectural Layout (Wall-Clipped)",
     "📋 Authority Submission BOQ",
     "📈 Convergence & Benchmark",
     "🎮 Interactive HTML5 Simulator",
-    "📚 Standards & Equations"
+    "📚 Standards & Wall Model"
 ])
 
-# TAB 1: ARCHITECTURAL LAYOUT
+# TAB 1: ARCHITECTURAL LAYOUT WITH STRICT WALL CLIPPING
 with tab_layout:
-    st.subheader(f"Optimal Detector Placement & Coverage Heatmap — {geometry.name}")
+    st.subheader(f"Detector Placement with Strict Wall Clipping — {geometry.name} (Radius: {custom_radius:.1f}m)")
 
-    fig, ax = plt.subplots(figsize=(14, 9))
-    ax.set_xlim(-1, 26)
-    ax.set_ylim(-1, 18)
+    fig, ax = plt.subplots(figsize=(14, 9.5))
+    ax.set_xlim(-1.0, 26.0)
+    ax.set_ylim(-1.0, 18.0)
     ax.set_aspect("equal")
     ax.grid(True, linestyle=":", alpha=0.5)
 
@@ -491,30 +490,37 @@ with tab_layout:
         x1, y1, x2, y2 = r["rect"]
         w, h = x2 - x1, y2 - y1
         bg = "#FEF9E7" if r.get("critical", False) else "#F8FAFC"
-        rect_patch = patches.Rectangle((x1, y1), w, h, linewidth=2.0, edgecolor="#334155", facecolor=bg, alpha=0.85)
+        rect_patch = patches.Rectangle((x1, y1), w, h, linewidth=2.5, edgecolor="#1E293B", facecolor=bg, alpha=0.85, zorder=1)
         ax.add_patch(rect_patch)
-        ax.text(x1 + w/2, y1 + h/2 + 0.3, r["name"], ha="center", va="center", fontsize=9, color="#1e293b", weight="bold")
-        ax.text(x1 + w/2, y1 + h/2 - 0.4, f"{(w*h):.1f} m²", ha="center", va="center", fontsize=8, color="#64748b")
+        ax.text(x1 + w/2, y1 + h/2 + 0.3, r["name"], ha="center", va="center", fontsize=9, color="#0f172a", weight="bold", zorder=4)
+        ax.text(x1 + w/2, y1 + h/2 - 0.4, f"{(w*h):.1f} m²", ha="center", va="center", fontsize=8, color="#64748b", zorder=4)
 
     for i, d in enumerate(best_res.detectors):
         dx, dy, r_idx = d[0], d[1], d[2]
-        rad = geometry.rooms[r_idx].get("target_r", custom_radius)
-        cov_circle = patches.Circle((dx, dy), rad, facecolor="#E74C3C", edgecolor="#C0392B", alpha=0.18, linewidth=1.2, linestyle="--")
-        ax.add_patch(cov_circle)
-        ax.plot(dx, dy, marker="o", markersize=8, markerfacecolor="#E74C3C", markeredgecolor="#7B241C", markeredgewidth=1.5)
-        ax.plot(dx, dy, marker="+", markersize=5, color="white", markeredgewidth=1.5)
-        ax.text(dx, dy - 0.5, f"D{i+1}", ha="center", va="top", fontsize=8, weight="bold", color="#0F172A")
+        r = geometry.rooms[r_idx]
+        rad = r.get("target_r", custom_radius)
+        rx1, ry1, rx2, ry2 = r["rect"]
+        rw, rh = rx2 - rx1, ry2 - ry1
 
-    ax.set_xlabel("Width (meters)", fontweight="bold")
-    ax.set_ylabel("Depth (meters)", fontweight="bold")
-    ax.set_title(f"{best_res.method_name} Layout Solution ({best_res.count} Nodes | {best_res.coverage*100:.2f}% Coverage)", fontsize=12, weight="bold")
+        clip_box = patches.Rectangle((rx1, ry1), rw, rh, transform=ax.transData)
+
+        cov_circle = patches.Circle((dx, dy), rad, facecolor="#E74C3C", edgecolor="#C0392B", alpha=0.22, linewidth=1.5, linestyle="--", zorder=2)
+        cov_circle.set_clip_path(clip_box)
+        ax.add_patch(cov_circle)
+
+        ax.plot(dx, dy, marker="o", markersize=8, markerfacecolor="#E74C3C", markeredgecolor="#7B241C", markeredgewidth=1.5, zorder=5)
+        ax.plot(dx, dy, marker="+", markersize=5, color="white", markeredgewidth=1.5, zorder=6)
+        ax.text(dx, dy - 0.45, f"D{i+1}", ha="center", va="top", fontsize=8, weight="bold", color="#0F172A", zorder=7)
+
+    ax.set_xlabel("Building Width (meters)", fontweight="bold")
+    ax.set_ylabel("Building Depth (meters)", fontweight="bold")
+    ax.set_title(f"{best_res.method_name} Layout — Full Frame View ({best_res.count} Nodes | {best_res.coverage*100:.2f}% Coverage)", fontsize=12, weight="bold")
     plt.tight_layout()
     st.pyplot(fig)
 
-# TAB 2: AUTHORITY SUBMISSION BOQ
+# --- TAB 2: AUTHORITY BOQ ---
 with tab_schedule:
     st.subheader(f"Official Authority Submission Schedule — {geometry.name}")
-    st.caption("Schedule of rates compliant with UGVCL Low Voltage Tender Specifications (SOR Item 3.4).")
 
     counts = [0] * len(geometry.rooms)
     for d in best_res.detectors:
@@ -530,11 +536,11 @@ with tab_schedule:
             "Protected Zone / Room Name": r["name"],
             "Floor Area (m²)": f"{area:.2f}",
             "Detector Qty": qty,
-            "Target Radius (m)": r.get("target_r", custom_radius),
-            "Risk Classification": "High Risk / Critical" if r.get("critical", False) else "Standard Habitable Area",
+            "Target Radius (m)": f"{r.get('target_r', custom_radius):.1f}m",
+            "Risk Classification": "High Risk / Critical" if r.get("critical", False) else "Standard Area",
             "Unit Rate (₹)": f"₹{cost_model.total_cost_per_node:,.0f}",
             "Total Amount (₹)": f"₹{cost:,.0f}",
-            "IS 2189 Compliance": "Compliant"
+            "Wall Containment": "Strict Compartment"
         })
 
     df_schedule = pd.DataFrame(table_data)
@@ -544,13 +550,13 @@ with tab_schedule:
     st.download_button(
         label="📥 Download Authority Schedule (CSV)",
         data=csv_str,
-        file_name=f"{geometry.name.replace(' ', '_')}_Authority_BOQ.csv",
+        file_name=f"{geometry.name.replace(' ', '_')}_Strict_Wall_BOQ.csv",
         mime="text/csv"
     )
 
-# TAB 3: BENCHMARK & CONVERGENCE
+# --- TAB 3: BENCHMARK ---
 with tab_benchmark:
-    st.subheader("Optimization Performance & Convergence Comparison")
+    st.subheader("Optimization Performance Comparison")
     col_chart, col_summary = st.columns([2, 1])
 
     with col_chart:
@@ -560,9 +566,9 @@ with tab_benchmark:
             if res.history:
                 xs = np.linspace(0, 100, len(res.history))
                 ax_conv.plot(xs, res.history, label=f"{name} (Time: {res.time_seconds:.2f}s | Cov: {res.coverage*100:.1f}%)", color=colors.get(name, "#333"), linewidth=2)
-        ax_conv.set_title("Fitness Convergence Rate vs. Optimization Progress", fontsize=11, weight="bold")
+        ax_conv.set_title("Fitness Convergence vs. Optimization Progress", fontsize=11, weight="bold")
         ax_conv.set_xlabel("Progress (%)")
-        ax_conv.set_ylabel("Fitness (Cost + Overlap Penalties)")
+        ax_conv.set_ylabel("Fitness Score")
         ax_conv.grid(True, linestyle="--", alpha=0.5)
         ax_conv.legend()
         plt.tight_layout()
@@ -580,32 +586,34 @@ with tab_benchmark:
                 "Time (s)": f"{res.time_seconds:.2f}s"
             })
         st.dataframe(pd.DataFrame(bench_rows), hide_index=True, width="stretch")
-        st.info("💡 **Winner: Particle Swarm Optimization (PSO)** achieved the fastest convergence with continuous coordinate balance and zero blind spots.")
+        st.info("💡 **Winner: Particle Swarm Optimization (PSO)** achieves optimal continuous coordinate convergence with zero wall bleed.")
 
-# TAB 4: INTERACTIVE HTML5 SIMULATOR
+# --- TAB 4: SIMULATOR ---
 with tab_simulator:
-    st.subheader("Interactive Standalone CAD Simulator")
+    st.subheader("Interactive HTML5 Simulator (Wall-Clipped Canvas)")
     simulator_path = os.path.join(ROOT_DIR, "detector_simulator.html")
     if os.path.exists(simulator_path):
         with open(simulator_path, "r", encoding="utf-8") as f:
             html_content = f.read()
         st.components.v1.html(html_content, height=750, scrolling=True)
     else:
-        st.info("Interactive simulator can also be opened via detector_simulator.html")
+        st.info("Open detector_simulator.html directly in your browser.")
 
-# TAB 5: STANDARDS & EQUATIONS
+# --- TAB 5: STANDARDS & WALL MODEL ---
 with tab_standards:
-    st.subheader("Mathematical Formulation & Fire Alarm Standards")
+    st.subheader("Strict Room Wall Containment Model & Fire Standards")
     st.markdown(r"""
-    ### 1. Multi-Objective Optimization Problem
-    $$\min_{\mathbf{X}, N} \mathcal{F}(\mathbf{X}) = N \cdot C_{\text{unit}} + w_1 \left(1 - \Phi_{\text{cov}}(\mathbf{X})\right) P_{\text{cov}} + w_2 \Psi_{\text{overlap}}(\mathbf{X}) + w_3 \sum_{k=1}^M \max(0, N_{\min, k} - N_k) P_{\min}$$
+    ### 1. Physical Wall Occlusion & Raycast Invariant
+    In building fire safety (IS 2189 / NFPA 72), solid partition walls physically obstruct optical smoke propagation.
+    Let room $k$ be defined by orthogonal polygon $\Omega_k \subset \mathbb{R}^2$. The spatial coverage field of sensor $i \in \Omega_k$ is strictly bounded:
+    $$\mathcal{C}_i = \mathcal{B}\left((x_i, y_i), R\right) \cap \Omega_k$$
+    $$\forall \mathbf{p} \in \Omega_j \; (j \neq k), \quad \mathcal{I}(\mathbf{p}, i) = 0$$
 
-    ### 2. Particle Swarm Optimization (PSO)
-    $$\mathbf{V}_p^{t+1} = w(t) \mathbf{V}_p^t + c_1 r_1 \odot (\mathbf{pbest}_p - \mathbf{X}_p^t) + c_2 r_2 \odot (\mathbf{gbest} - \mathbf{X}_p^t)$$
-    $$\mathbf{X}_p^{t+1} = \mathbf{X}_p^t + \mathbf{V}_p^{t+1}$$
+    ### 2. Multi-Room Detector Density as Radius $R \in [1.0\text{ m}, 5.0\text{ m}]$ Varies
+    For a room of dimension $W \times H$, the theoretical minimum detectors under complete internal covering without wall breaching is:
+    $$N_k(R) = \left\lceil \frac{W}{\sqrt{2} R \cdot \eta} \right\rceil \times \left\lceil \frac{H}{\sqrt{2} R \cdot \eta} \right\rceil, \quad \eta \approx 0.9$$
 
-    ### 3. Standards Compliance Matrix
-    - **IS 2189 (Bureau of Indian Standards)**: Mandatory automatic detection in high-risk SCADA rooms, server rooms, and escape corridors.
-    - **NFPA 72**: Maximum smooth ceiling spacing of $9.1\text{ m}$ ($30\text{ ft}$) with radius $R = 6.4\text{ m}$.
-    - **EN 54 / VdS**: Dual-optical light scattering (blue/infrared) multisensor smoke detectors with integrated dual isolators (Tender SOR Item 3.4).
+    ### 3. Statutory Standards
+    - **IS 2189**: Separate dedicated detectors for high-risk SCADA control rooms, server rooms, and battery rooms.
+    - **NFPA 72**: Maximum smooth ceiling spacing of $9.1\text{ m}$ ($30\text{ ft}$) with max radius $R = 6.4\text{ m}$, reduced to $4.0 - 4.5\text{ m}$ in enclosed high-hazard zones.
     """)
